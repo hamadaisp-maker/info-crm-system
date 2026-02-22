@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/src/lib/supabase'
-import Papa from 'papaparse'
+import * as Papa from 'papaparse'
 
 const API_SECRET = process.env.CRON_SECRET || 'sync-secret'
 
