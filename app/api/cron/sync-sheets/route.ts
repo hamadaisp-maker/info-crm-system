@@ -83,15 +83,20 @@ export async function GET(request: Request) {
                 continue
             }
 
-            // Parse recent rows (e.g. last 100 rows to avoid checking entire history)
-            const dataRows = rows.slice(headerIdx + 1).slice(-150)
+            // 毎日Cron実行するため、過去数日分の差分さえ取れれば十分（Vercelの10秒タイムアウト対策）
+            const dataRows = rows.slice(headerIdx + 1).slice(-30)
 
             for (const row of dataRows) {
-                const name = row[nameIdx]
-                if (!name) continue
+                const emailAddr = emailIdx !== -1 ? row[emailIdx] : ''
+                let name = row[nameIdx] || ''
+
+                if (!name && isEmail && emailAddr) {
+                    name = emailAddr.split('@')[0] || 'Unknown'
+                }
+
+                if (!name && !emailAddr) continue
 
                 const phone = phoneIdx !== -1 ? row[phoneIdx] : ''
-                const emailAddr = emailIdx !== -1 ? row[emailIdx] : ''
                 const date = dateIdx !== -1 ? row[dateIdx] : ''
                 const time = timeIdx !== -1 ? row[timeIdx] : ''
                 const content = row[contentIdx]
@@ -141,8 +146,9 @@ export async function GET(request: Request) {
                     customerId = existingCust[0].id
                 } else {
                     const { data: newCust, error: custErr } = await supabase.from('customers').insert([{
-                        name, phone: phone || null, email: emailAddr || null, company: sheet.company
+                        name, phone: phone || null, email: emailAddr || null
                     }]).select().single()
+                    if (custErr) console.error("CustError:", custErr)
                     if (newCust && !custErr) customerId = newCust.id
                 }
 
