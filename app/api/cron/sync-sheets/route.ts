@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/src/lib/supabase'
 import * as Papa from 'papaparse'
 
+export const dynamic = 'force-dynamic'
 const API_SECRET = process.env.CRON_SECRET || 'sync-secret'
 
 const SHEETS = [
