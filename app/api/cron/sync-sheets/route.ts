@@ -23,8 +23,13 @@ const SHEETS = [
     },
     {
         name: 'JapanRecord_架電連絡事項',
-        url: 'https://docs.google.com/spreadsheets/d/19Xtdl7GdEjD9SdCcy1EJyiw-YyaMr2HS9ihxvMg7yjA/gviz/tq?tqx=out:csv&sheet=%E6%9E%B6%E9%9B%BB%E3%83%BB%E9%80%A3%E7%B5%A1%E4%BA%8B%E9%A0%85',
+        url: 'https://docs.google.com/spreadsheets/d/19Xtdl7GdEjD9SdCcy1EJyiw-YyaMessage/gviz/tq?tqx=out:csv&sheet=%E6%9E%B6%E9%9B%BB%E3%83%BB%E9%80%A3%E7%B5%A1%E4%BA%8B%E9%A0%85',
         company: 'JapanRecord'
+    },
+    {
+        name: '統合_メール履歴記録',
+        url: 'https://docs.google.com/spreadsheets/d/14rkBT-gIjVG8K4DHLcRJFCL8dp4G9qwzCSsYEwW8PXs/gviz/tq?tqx=out:csv',
+        company: '共通'
     }
 ]
 
@@ -49,7 +54,7 @@ export async function GET(request: Request) {
             if (rows.length < 2) continue
 
             // Find header row index
-            let headerIdx = rows.findIndex(r => r.some(c => typeof c === 'string' && (c.includes('お客様名') || c.includes('氏名'))))
+            let headerIdx = rows.findIndex(r => r.some(c => typeof c === 'string' && (c.includes('お客様名') || c.includes('氏名') || c.includes('顧客名'))))
             if (headerIdx === -1) headerIdx = 0
 
             const headers = rows[headerIdx]
@@ -59,16 +64,19 @@ export async function GET(request: Request) {
             headers.forEach((h, i) => { if (typeof h === 'string') colMap[h.trim()] = i })
 
             // Keys we usually expect:
-            const nameIdx = colMap['お客様名'] ?? colMap['氏名'] ?? -1
+            const nameIdx = colMap['お客様名'] ?? colMap['氏名'] ?? colMap['顧客名'] ?? -1
             const phoneIdx = colMap['TEL'] ?? colMap['電話番号'] ?? -1
-            const dateIdx = colMap['受付日'] ?? colMap['日付'] ?? -1
+            const emailIdx = colMap['顧客ID / メールアドレス'] ?? -1
+            const dateIdx = colMap['受付日'] ?? colMap['日付'] ?? colMap['日時'] ?? -1
             const timeIdx = colMap['時間'] ?? -1
-            const contentIdx = Object.keys(colMap).find(k => k.includes('内容')) ? colMap[Object.keys(colMap).find(k => k.includes('内容'))!] : -1
+            const contentIdx = Object.keys(colMap).find(k => k.includes('内容') || k.includes('本文')) ? colMap[Object.keys(colMap).find(k => k.includes('内容') || k.includes('本文'))!] : -1
             const staffIdx = colMap['担当'] ?? -1
+            const msgIdIdx = colMap['メッセージID'] ?? -1
 
             // Variables for later appends
             const isKToM = sheet.name.includes('認知症協会_架電連絡事項')
             const isLToN = sheet.name.includes('JapanRecord_架電連絡事項')
+            const isEmail = sheet.name.includes('メール履歴')
 
             if (nameIdx === -1 || contentIdx === -1) {
                 console.warn(`Skipping ${sheet.name}: Missing essential columns.`)
@@ -76,17 +84,19 @@ export async function GET(request: Request) {
             }
 
             // Parse recent rows (e.g. last 100 rows to avoid checking entire history)
-            const dataRows = rows.slice(headerIdx + 1).slice(-100)
+            const dataRows = rows.slice(headerIdx + 1).slice(-150)
 
             for (const row of dataRows) {
                 const name = row[nameIdx]
                 if (!name) continue
 
                 const phone = phoneIdx !== -1 ? row[phoneIdx] : ''
+                const emailAddr = emailIdx !== -1 ? row[emailIdx] : ''
                 const date = dateIdx !== -1 ? row[dateIdx] : ''
                 const time = timeIdx !== -1 ? row[timeIdx] : ''
                 const content = row[contentIdx]
                 const staff = staffIdx !== -1 ? row[staffIdx] : ''
+                const msgId = msgIdIdx !== -1 ? row[msgIdIdx] : ''
 
                 // Compute extra tracking notes for 架電連絡事項
                 let extraNotes = ""
@@ -112,63 +122,98 @@ export async function GET(request: Request) {
                 if (date) {
                     try {
                         // Assuming JP locale date string yyyy/mm/dd
-                        const dateTimeStr = time ? `${date} ${time}` : `${date} 12:00`
+                        const dateTimeStr = time ? `${date} ${time}` : (isEmail ? date : `${date} 12:00`)
                         receivedAt = new Date(dateTimeStr).toISOString()
                     } catch (e) { /* ignore parse error */ }
                 }
 
                 // Check customer
                 let customerId = null
-                const { data: existingCust } = await supabase.from('customers').select('id').eq('name', name).limit(1)
+                let custQuery = supabase.from('customers').select('id')
+                if (isEmail && emailAddr) {
+                    custQuery = custQuery.eq('email', emailAddr).limit(1)
+                } else {
+                    custQuery = custQuery.eq('name', name).limit(1)
+                }
+
+                const { data: existingCust } = await custQuery
                 if (existingCust && existingCust.length > 0) {
                     customerId = existingCust[0].id
                 } else {
                     const { data: newCust, error: custErr } = await supabase.from('customers').insert([{
-                        name, phone: phone || null, company: sheet.company
+                        name, phone: phone || null, email: emailAddr || null, company: sheet.company
                     }]).select().single()
                     if (newCust && !custErr) customerId = newCust.id
                 }
 
                 if (!customerId) continue
 
-                // Check inquiry using exact timestamp and customer ID, or recent time
-                // To be safe, we check if an inquiry with the same customer & channel ('電話') exists within 2 days with similar content
-                const { data: existingInq } = await supabase.from('inquiries')
-                    .select('id, content')
-                    .eq('customer_id', customerId)
-                    .eq('channel', '電話')
-                    .order('received_at', { ascending: false })
-                    .limit(5)
+                if (isEmail) {
+                    // Check duplicate exactly by MessageID in notes
+                    if (!msgId) continue // If no message ID, we can't reliably prevent duplicates
 
-                let foundMatch = null
-                if (existingInq) {
-                    for (const inq of existingInq) {
-                        if (inq.content.startsWith(content.substring(0, 30))) {
-                            foundMatch = inq
-                            break
+                    const searchStr = `MessageID: ${msgId}`
+                    const { data: existingEmail } = await supabase.from('inquiries')
+                        .select('id')
+                        .eq('customer_id', customerId)
+                        .eq('channel', 'Email')
+                        .like('notes', `%${searchStr}%`)
+                        .limit(1)
+
+                    if (!existingEmail || existingEmail.length === 0) {
+                        await supabase.from('inquiries').insert([{
+                            customer_id: customerId,
+                            company: sheet.company,
+                            channel: 'Email',
+                            direction: 'IN', // Could be OUT based on staff, but usually IN for this log
+                            content: finalContent,
+                            status: '完了', // Email is usually just logged
+                            notes: searchStr,
+                            received_at: receivedAt
+                        }])
+                        totalImported++
+                    }
+
+                } else {
+                    // Check inquiry using exact timestamp and customer ID, or recent time
+                    // To be safe, we check if an inquiry with the same customer & channel ('電話') exists within 2 days with similar content
+                    const { data: existingInq } = await supabase.from('inquiries')
+                        .select('id, content')
+                        .eq('customer_id', customerId)
+                        .eq('channel', '電話')
+                        .order('received_at', { ascending: false })
+                        .limit(5)
+
+                    let foundMatch = null
+                    if (existingInq) {
+                        for (const inq of existingInq) {
+                            if (inq.content.startsWith(content.substring(0, 30))) {
+                                foundMatch = inq
+                                break
+                            }
                         }
                     }
-                }
 
-                if (foundMatch) {
-                    // Check if extraNotes implies we should update
-                    if (finalContent !== foundMatch.content) {
-                        await supabase.from('inquiries').update({ content: finalContent, status: '対応済' }).eq('id', foundMatch.id)
-                        totalUpdated++
+                    if (foundMatch) {
+                        // Check if extraNotes implies we should update
+                        if (finalContent !== foundMatch.content) {
+                            await supabase.from('inquiries').update({ content: finalContent, status: '対応済' }).eq('id', foundMatch.id)
+                            totalUpdated++
+                        }
+                    } else {
+                        // Insert new
+                        await supabase.from('inquiries').insert([{
+                            customer_id: customerId,
+                            company: sheet.company,
+                            channel: '電話',
+                            direction: 'IN', // Defaulting to IN, but this could vary
+                            content: finalContent,
+                            status: extraNotes ? '対応済' : '対応中',
+                            source_account: staff ? `担当: ${staff}` : null,
+                            received_at: receivedAt
+                        }])
+                        totalImported++
                     }
-                } else {
-                    // Insert new
-                    await supabase.from('inquiries').insert([{
-                        customer_id: customerId,
-                        company: sheet.company,
-                        channel: '電話',
-                        direction: 'IN', // Defaulting to IN, but this could vary
-                        content: finalContent,
-                        status: extraNotes ? '対応済' : '対応中',
-                        source_account: staff ? `担当: ${staff}` : null,
-                        received_at: receivedAt
-                    }])
-                    totalImported++
                 }
             }
         }
