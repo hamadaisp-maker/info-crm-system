@@ -3,13 +3,13 @@
 import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { CustomerDetailDialog } from "@/components/customer-detail-dialog"
+import { CustomerDetailDialog, type CustomerDetails } from "@/components/customer-detail-dialog"
 
-export function CustomersTable({ customers }: { customers: any[] }) {
-    const [selectedCustomer, setSelectedCustomer] = useState<any>(null)
+export function CustomersTable({ customers }: { customers: CustomerDetails[] }) {
+    const [selectedCustomer, setSelectedCustomer] = useState<CustomerDetails | null>(null)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-    const handleRowClick = (customer: any) => {
+    const handleRowClick = (customer: CustomerDetails) => {
         setSelectedCustomer(customer)
         setIsDialogOpen(true)
     }
@@ -34,7 +34,7 @@ export function CustomersTable({ customers }: { customers: any[] }) {
                             </TableCell>
                         </TableRow>
                     ) : (
-                        customers.map((cus: any) => (
+                        customers.map((cus) => (
                             <TableRow
                                 key={cus.id}
                                 className="cursor-pointer hover:bg-slate-50 transition-colors"

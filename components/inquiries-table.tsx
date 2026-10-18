@@ -4,14 +4,13 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Phone, Mail, MessageSquare } from "lucide-react"
-import { format } from "date-fns"
-import { InquiryDetailDialog } from "@/components/inquiry-detail-dialog"
+import { InquiryDetailDialog, formatInquiryDate, type InquiryDetails } from "@/components/inquiry-detail-dialog"
 
-export function InquiriesTable({ inquiries }: { inquiries: any[] }) {
-    const [selectedInquiry, setSelectedInquiry] = useState<any>(null)
+export function InquiriesTable({ inquiries }: { inquiries: InquiryDetails[] }) {
+    const [selectedInquiry, setSelectedInquiry] = useState<InquiryDetails | null>(null)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-    const handleRowClick = (inquiry: any) => {
+    const handleRowClick = (inquiry: InquiryDetails) => {
         setSelectedInquiry(inquiry)
         setIsDialogOpen(true)
     }
@@ -21,7 +20,7 @@ export function InquiriesTable({ inquiries }: { inquiries: any[] }) {
             <Table>
                 <TableHeader className="bg-slate-50">
                     <TableRow className="hover:bg-transparent">
-                        <TableHead className="w-[180px]">発生日時</TableHead>
+                        <TableHead className="w-[180px]">発生日時（日本時間）</TableHead>
                         <TableHead className="w-[120px]">チャネル</TableHead>
                         <TableHead className="w-[120px]">対象会社</TableHead>
                         <TableHead className="w-[200px]">顧客名</TableHead>
@@ -37,14 +36,14 @@ export function InquiriesTable({ inquiries }: { inquiries: any[] }) {
                             </TableCell>
                         </TableRow>
                     ) : (
-                        inquiries.map((inq: any) => (
+                        inquiries.map((inq) => (
                             <TableRow
                                 key={inq.id}
                                 className="cursor-pointer hover:bg-slate-50 transition-colors"
                                 onClick={() => handleRowClick(inq)}
                             >
                                 <TableCell className="font-medium text-slate-600">
-                                    {inq.received_at ? format(new Date(inq.received_at), 'yyyy/MM/dd HH:mm') : '-'}
+                                    {formatInquiryDate(inq.received_at)}
                                 </TableCell>
                                 <TableCell>
                                     <Badge variant="outline" className={`border-none shadow-none ${inq.channel === '電話' ? 'bg-blue-50 text-blue-700' :
