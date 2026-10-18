@@ -1,7 +1,7 @@
-import { createClient } from '@/src/lib/supabase'
+import { requireMemberPage } from '@/src/lib/auth'
 
 export async function fetchCustomers() {
-    const supabase = createClient()
+    const supabase = await requireMemberPage()
     const { data, error } = await supabase
         .from('customers')
         .select('*')
@@ -15,7 +15,7 @@ export async function fetchCustomers() {
 }
 
 export async function fetchInquiries() {
-    const supabase = createClient()
+    const supabase = await requireMemberPage()
     const { data, error } = await supabase
         .from('inquiries')
         .select(`
